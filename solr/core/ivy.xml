@@ -52,6 +52,7 @@
     <dependency org="org.slf4j" name="jcl-over-slf4j" rev="${/org.slf4j/jcl-over-slf4j}" conf="compile"/>
 
     <dependency org="org.mockito" name="mockito-core" rev="${/org.mockito/mockito-core}" conf="test"/>
+    <dependency org="org.mongodb" name="mongo-java-driver" rev="3.4.2" conf="compile"/>
     <dependency org="net.bytebuddy" name="byte-buddy" rev="${/net.bytebuddy/byte-buddy}" conf="test"/>
     <dependency org="org.objenesis" name="objenesis" rev="${/org.objenesis/objenesis}" conf="test"/>
 
@@ -62,6 +63,9 @@
 
 
     <dependency org="org.apache.hadoop" name="hadoop-common" rev="${/org.apache.hadoop/hadoop-common}" conf="compile.hadoop"/>
+    <!-- https://mvnrepository.com/artifact/org.apache.lucene/lucene-analyzers-icu -->
+    <dependency org="org.apache.lucene" name="lucene-analyzers-icu" rev="4.7.1" conf="compile"/>
+
     <!--
       hadoop-hdfs, hadoop-annotations and hadoop-auth are runtime dependencies,
       so even though they are not compile-time dependencies, they are included
