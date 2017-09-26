@@ -34,6 +34,8 @@ import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
 import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field.Store;
+import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.IndexReader;
@@ -66,6 +68,7 @@ import org.apache.solr.common.util.NamedList;
 import org.apache.solr.common.util.SimpleOrderedMap;
 import org.apache.solr.core.PluginInfo;
 import org.apache.solr.core.SolrCore;
+import org.apache.solr.highlight.MongoConnection;
 import org.apache.solr.handler.component.HighlightComponent;
 import org.apache.solr.request.SolrQueryRequest;
 import org.apache.solr.schema.IndexSchema;
@@ -76,6 +79,10 @@ import org.apache.solr.search.SolrIndexSearcher;
 import org.apache.solr.util.plugin.PluginInfoInitialized;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import com.mongodb.Block;
+
+import static com.mongodb.client.model.Filters.*;
 
 /**
  *
@@ -364,7 +371,7 @@ public class DefaultSolrHighlighter extends SolrHighlighter implements PluginInf
    * @param req the current request
    * @param defaultFields default list of fields to summarize
    *
-   * @return NamedList containing a NamedList for each document, which in 
+   * @return NamedList containing a NamedList for each document, which in
    * turns contains sets (field, summary) pairs.
    */
   @Override
@@ -404,9 +411,49 @@ public class DefaultSolrHighlighter extends SolrHighlighter implements PluginInf
     // Highlight each document
     NamedList fragments = new SimpleOrderedMap();
     DocIterator iterator = docs.iterator();
-    for (int i = 0; i < docs.size(); i++) {
+
+    HashMap<Integer, String> docIds = new HashMap<Integer, String>();
+    ArrayList<String> searchIds = new ArrayList<String>();
+    Map<String, String> envMap = System.getenv();
+    int maxHighlightCount = Integer.parseInt(envMap.getOrDefault("MAX_HIGHLIGHT_COUNT", "3"));
+
+    for (int i = 0; i < Math.min(docs.size(), maxHighlightCount); i++) {
       int docId = iterator.nextDoc();
       Document doc = searcher.doc(docId, preFetchFieldNames);
+      docIds.put(docId, doc.get("id"));
+      searchIds.add(doc.get("id"));
+    }
+
+    HashMap<String, TextField> documents = new HashMap<String, TextField>();
+
+    int maxCharsToAnalyze = params.getInt(
+        HighlightParams.MAX_CHARS,
+        Highlighter.DEFAULT_MAX_CHARS_TO_ANALYZE);
+
+    Block<org.bson.Document> mapBlock = new Block<org.bson.Document>() {
+      public void apply(final org.bson.Document result) {
+        Document doc = new Document();
+        String content = result.getString("content");
+        if(content == null || content.isEmpty()) {
+          content = "";
+        } else {
+          content = content.substring(0, Math.min(maxCharsToAnalyze, content.length()));
+        }
+        TextField field = new TextField("highlight_content", content, Store.YES);
+        String name = field.name();
+        String stringId = result.getString("_id");
+        documents.put(stringId, field);
+      };
+    };
+
+    MongoConnection.collection.find(in("_id", searchIds)).forEach(mapBlock);
+    DocIterator newIterator = docs.iterator();
+    for (int i = 0; i < docs.size(); i++) {
+      int docId = newIterator.nextDoc();
+      Document doc = searcher.doc(docId, preFetchFieldNames);
+      String docStringId = docIds.get(docId);
+      TextField field = documents.get(docStringId);
+      doc.add(field);
 
       @SuppressWarnings("rawtypes")
       NamedList docHighlights = new SimpleOrderedMap();
@@ -649,13 +696,15 @@ public class DefaultSolrHighlighter extends SolrHighlighter implements PluginInf
     // Collect the Fields we will examine (could be more than one if multi-valued)
     List<String> result = new ArrayList<>();
     for (IndexableField thisField : doc.getFields()) {
-      if (! thisField.name().equals(fieldName)) {
+      String name = thisField.name();
+      if (! name.equals("highlight_" + fieldName)) {
         continue;
       }
-      String value = thisField.stringValue();
-      result.add(value);
+      IndexableField thisHighlightField = doc.getField("highlight_" + fieldName);
+      String valueMock = thisHighlightField.stringValue();
+      result.add(valueMock);
 
-      maxCharsToAnalyze -= value.length();//we exit early if we'll never get to analyze the value
+      maxCharsToAnalyze -= valueMock.length();//we exit early if we'll never get to analyze the value
       maxValues--;
       if (maxValues <= 0 || maxCharsToAnalyze <= 0) {
         break;
